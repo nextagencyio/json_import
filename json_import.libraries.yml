@@ -1,0 +1,9 @@
+admin:
+  css:
+    theme:
+      css/json-import-admin.css: {}
+  js:
+    js/json-import-admin.js: {}
+  dependencies:
+    - core/jquery
+    - core/drupal

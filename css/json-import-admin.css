@@ -1,0 +1,65 @@
+.dcloud-import-description {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.dcloud-import-description h3 {
+  margin-top: 0;
+  color: #495057;
+}
+
+.dcloud-import-example textarea {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 12px;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+}
+
+.dcloud-import-field-types {
+  background: #fff;
+  padding: 15px;
+  border-radius: 4px;
+}
+
+.dcloud-import-field-types h4 {
+  margin-top: 20px;
+  margin-bottom: 10px;
+  color: #495057;
+  border-bottom: 1px solid #dee2e6;
+  padding-bottom: 5px;
+}
+
+.dcloud-import-field-types h4:first-child {
+  margin-top: 0;
+}
+
+.dcloud-import-field-types ul {
+  margin-left: 0;
+  padding-left: 20px;
+}
+
+.dcloud-import-field-types li {
+  margin-bottom: 5px;
+}
+
+.form-item-json-input textarea {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 13px;
+}
+
+.form-item-preview {
+  margin-top: 15px;
+  padding: 15px;
+  background: #e7f3ff;
+  border-radius: 4px;
+}
+
+.form-actions {
+  margin-top: 20px;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 4px;
+}

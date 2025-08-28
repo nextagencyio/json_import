@@ -1,0 +1,6 @@
+json_import.import_form:
+  title: 'JSON Content Import'
+  description: 'Import Drupal model and content from JSON via admin form or drush command.'
+  route_name: json_import.import_form
+  parent: system.admin_config_content
+  weight: 20

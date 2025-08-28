@@ -1,0 +1,4 @@
+'import json import config':
+  title: 'Import JSON Configuration'
+  description: 'Allow importing of content types, fields, and configuration via admin form or drush command.'
+  restrict access: TRUE

@@ -1,0 +1,16 @@
+name: JSON Import
+description: 'Import Drupal model and content from JSON via admin form or drush command.'
+type: module
+core_version_requirement: ^10 || ^11
+package: Custom
+dependencies:
+  - drupal:node
+  - drupal:field
+  - drupal:text
+  - drupal:options
+  - drupal:link
+  - drupal:image
+  - drupal:datetime
+  - drupal:datetime_range
+  - paragraphs:paragraphs
+  - drupal:entity_reference_revisions

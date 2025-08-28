@@ -1,0 +1,7 @@
+json_import.import_form:
+  path: '/admin/config/content/json-import'
+  defaults:
+    _form: '\Drupal\json_import\Form\JsonImportForm'
+    _title: 'JSON Content Import'
+  requirements:
+    _permission: 'import json import config'

@@ -1,0 +1,16 @@
+services:
+  json_import.field_type_mapper:
+    class: Drupal\json_import\Service\FieldTypeMapper
+
+  json_import.file_validation:
+    class: Drupal\json_import\Service\FileValidationService
+
+  json_import.importer:
+    class: Drupal\json_import\Service\DrupalContentImporter
+    arguments: ['@entity_type.manager', '@config.factory', '@json_import.field_type_mapper']
+
+  json_import.commands:
+    class: Drupal\json_import\Commands\JsonImportCommands
+    arguments: ['@json_import.importer']
+    tags:
+      - { name: drush.command }

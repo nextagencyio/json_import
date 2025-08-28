@@ -1,0 +1,229 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/nextagencyio/json_import/schema.json",
+  "title": "JSON Import Schema",
+  "description": "Schema for importing Drupal content types, paragraph types, and content via JSON",
+  "type": "object",
+  "properties": {
+    "model": {
+      "type": "array",
+      "description": "Array of content types and paragraph types to create",
+      "items": {
+        "$ref": "#/definitions/entityType"
+      }
+    },
+    "content": {
+      "type": "array",
+      "description": "Array of content entities to create", 
+      "items": {
+        "$ref": "#/definitions/contentEntity"
+      }
+    }
+  },
+  "anyOf": [
+    {"required": ["model"]},
+    {"required": ["content"]},
+    {"required": ["model", "content"]}
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "entityType": {
+      "type": "object",
+      "properties": {
+        "entity": {
+          "type": "string",
+          "enum": ["node", "paragraph"],
+          "description": "Entity type - defaults to 'node' if not specified"
+        },
+        "bundle": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Machine name for the content/paragraph type"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable label for the content type"
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the content type"
+        },
+        "body": {
+          "type": "boolean",
+          "description": "Whether to include a body field"
+        },
+        "fields": {
+          "type": "array",
+          "description": "Array of custom fields to add",
+          "items": {
+            "$ref": "#/definitions/fieldDefinition"
+          }
+        }
+      },
+      "required": ["bundle", "label"],
+      "additionalProperties": false
+    },
+    "fieldDefinition": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Field machine name"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Field label"
+        },
+        "type": {
+          "type": "string",
+          "description": "Field type (string, text, datetime, image, etc.)",
+          "examples": [
+            "string",
+            "string!",
+            "text", 
+            "datetime",
+            "datetime_range",
+            "image",
+            "bool",
+            "integer",
+            "float",
+            "email",
+            "link",
+            "paragraph(bundle_name)[]",
+            "term(vocabulary)[]"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "description": "Field description/help text"
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether field is required"
+        },
+        "cardinality": {
+          "type": ["integer", "string"],
+          "description": "Field cardinality - number or 'unlimited'"
+        },
+        "default_value": {
+          "description": "Default value for the field"
+        },
+        "settings": {
+          "type": "object",
+          "description": "Additional field settings",
+          "additionalProperties": true
+        }
+      },
+      "required": ["id", "label", "type"],
+      "additionalProperties": false
+    },
+    "contentEntity": {
+      "type": "object", 
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this content item"
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^(node|paragraph)\\.[a-z][a-z0-9_]*$",
+          "description": "Entity type and bundle (e.g., 'node.article', 'paragraph.text_block')"
+        },
+        "values": {
+          "type": "object",
+          "description": "Field values for the content",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Content title (for nodes)"
+            },
+            "status": {
+              "type": "boolean",
+              "description": "Published status"
+            },
+            "created": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Creation date"
+            },
+            "changed": {
+              "type": "string", 
+              "format": "date-time",
+              "description": "Last modified date"
+            }
+          },
+          "additionalProperties": true
+        },
+        "path": {
+          "type": "string",
+          "description": "URL alias for the content"
+        },
+        "translations": {
+          "type": "object",
+          "description": "Translations for multilingual content",
+          "patternProperties": {
+            "^[a-z]{2}(-[A-Z]{2})?$": {
+              "$ref": "#/definitions/translationValues"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["id", "type", "values"],
+      "additionalProperties": false
+    },
+    "translationValues": {
+      "type": "object",
+      "description": "Field values for a specific language translation",
+      "additionalProperties": true
+    }
+  },
+  "examples": [
+    {
+      "model": [
+        {
+          "bundle": "event",
+          "label": "Event", 
+          "description": "Content type for managing events",
+          "body": true,
+          "fields": [
+            {
+              "id": "event_date",
+              "label": "Event Date",
+              "type": "datetime",
+              "required": true
+            },
+            {
+              "id": "location", 
+              "label": "Location",
+              "type": "string"
+            },
+            {
+              "id": "featured",
+              "label": "Featured Event",
+              "type": "bool"
+            }
+          ]
+        }
+      ],
+      "content": [
+        {
+          "id": "event1",
+          "type": "node.event",
+          "path": "/events/sample-event",
+          "values": {
+            "title": "Sample Event",
+            "body": "<p>Event description here</p>",
+            "event_date": "2024-03-15T09:00:00",
+            "location": "Convention Center", 
+            "featured": true,
+            "status": true
+          }
+        }
+      ]
+    }
+  ]
+}
