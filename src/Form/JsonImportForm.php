@@ -5,6 +5,7 @@ namespace Drupal\json_import\Form;
 use Drupal\Core\Form\FormBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\json_import\Service\DrupalContentImporter;
+use Drupal\json_import\Service\JsonSchemaValidator;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
@@ -20,13 +21,23 @@ class JsonImportForm extends FormBase {
   protected $importer;
 
   /**
+   * The JSON schema validator service.
+   *
+   * @var \Drupal\json_import\Service\JsonSchemaValidator
+   */
+  protected $schemaValidator;
+
+  /**
    * Constructs a new JsonImportForm.
    *
    * @param \Drupal\json_import\Service\DrupalContentImporter $importer
    *   The Drupal content importer service.
+   * @param \Drupal\json_import\Service\JsonSchemaValidator $schema_validator
+   *   The JSON schema validator service.
    */
-  public function __construct(DrupalContentImporter $importer) {
+  public function __construct(DrupalContentImporter $importer, JsonSchemaValidator $schema_validator) {
     $this->importer = $importer;
+    $this->schemaValidator = $schema_validator;
   }
 
   /**
@@ -34,7 +45,8 @@ class JsonImportForm extends FormBase {
    */
   public static function create(ContainerInterface $container) {
     return new static(
-      $container->get('json_import.importer')
+      $container->get('json_import.importer'),
+      $container->get('json_import.schema_validator')
     );
   }
 
@@ -51,7 +63,8 @@ class JsonImportForm extends FormBase {
   public function buildForm(array $form, FormStateInterface $form_state) {
     $form['description'] = [
       '#markup' => '<p>' . $this->t('Import Drupal content types, paragraph types, and content from JSON configuration.') . '</p>' .
-                   '<p><strong>' . $this->t('Note:') . '</strong> ' . $this->t('GraphQL Compose will be automatically configured for all imported content types with all GraphQL options and fields enabled.') . '</p>',
+                   '<p><strong>' . $this->t('Note:') . '</strong> ' . $this->t('GraphQL Compose will be automatically configured for all imported content types with all GraphQL options and fields enabled.') . '</p>' .
+                   '<p>' . $this->t('Your JSON will be validated against our <a href="@schema_url" target="_blank">JSON schema</a> for better error reporting.', ['@schema_url' => 'https://raw.githubusercontent.com/nextagencyio/json_import/refs/heads/1.x/resources/schema.json']) . '</p>',
     ];
 
     // Add collapsed fieldset with example JSON
@@ -107,7 +120,24 @@ class JsonImportForm extends FormBase {
       return;
     }
 
-    // Validate the concise model structure.
+    // Validate against JSON schema first
+    $schema_validation = $this->schemaValidator->validate($data);
+    
+    if (!$schema_validation['valid']) {
+      foreach ($schema_validation['errors'] as $error) {
+        $form_state->setErrorByName('json_data', $this->t('Schema validation error: @error', ['@error' => $error]));
+      }
+      return;
+    }
+    
+    // Show schema validation warnings if any
+    if (!empty($schema_validation['warnings'])) {
+      foreach ($schema_validation['warnings'] as $warning) {
+        $this->messenger()->addWarning($warning);
+      }
+    }
+
+    // Validate the concise model structure (fallback validation).
     if (!$this->validateConciseModel($data)) {
       $form_state->setErrorByName('json_data', $this->t('Invalid JSON structure. Expected "model" and/or "content" arrays.'));
     }

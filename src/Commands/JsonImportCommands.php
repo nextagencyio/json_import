@@ -3,6 +3,7 @@
 namespace Drupal\json_import\Commands;
 
 use Drupal\json_import\Service\DrupalContentImporter;
+use Drupal\json_import\Service\JsonSchemaValidator;
 use Drush\Commands\DrushCommands;
 use Drush\Attributes as CLI;
 
@@ -19,13 +20,23 @@ final class JsonImportCommands extends DrushCommands {
   protected $importer;
 
   /**
+   * The JSON schema validator service.
+   *
+   * @var \Drupal\json_import\Service\JsonSchemaValidator
+   */
+  protected $schemaValidator;
+
+  /**
    * Constructs a new JsonImportCommands object.
    *
    * @param \Drupal\json_import\Service\DrupalContentImporter $importer
    *   The Drupal content importer service.
+   * @param \Drupal\json_import\Service\JsonSchemaValidator $schema_validator
+   *   The JSON schema validator service.
    */
-  public function __construct(DrupalContentImporter $importer) {
+  public function __construct(DrupalContentImporter $importer, JsonSchemaValidator $schema_validator) {
     $this->importer = $importer;
+    $this->schemaValidator = $schema_validator;
   }
 
   /**
@@ -72,7 +83,25 @@ final class JsonImportCommands extends DrushCommands {
       return;
     }
 
-    // Validate the structure
+    // Validate against JSON schema first
+    $schema_validation = $this->schemaValidator->validate($data);
+    
+    if (!$schema_validation['valid']) {
+      $this->logger()->error('Schema validation failed:');
+      foreach ($schema_validation['errors'] as $error) {
+        $this->logger()->error('  - ' . $error);
+      }
+      return;
+    }
+    
+    // Show schema validation warnings if any
+    if (!empty($schema_validation['warnings'])) {
+      foreach ($schema_validation['warnings'] as $warning) {
+        $this->logger()->warning($warning);
+      }
+    }
+
+    // Validate the structure (fallback validation)
     if (!$this->validateStructure($data)) {
       $this->logger()->error('Invalid JSON structure. Expected "model" and/or "content" arrays.');
       return;
