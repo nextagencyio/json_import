@@ -63,7 +63,6 @@ class JsonImportForm extends FormBase {
   public function buildForm(array $form, FormStateInterface $form_state) {
     $form['description'] = [
       '#markup' => '<p>' . $this->t('Import Drupal content types, paragraph types, and content from JSON configuration.') . '</p>' .
-                   '<p><strong>' . $this->t('Note:') . '</strong> ' . $this->t('GraphQL Compose will be automatically configured for all imported content types with all GraphQL options and fields enabled.') . '</p>' .
                    '<p>' . $this->t('Your JSON will be validated against our <a href="@schema_url" target="_blank">JSON schema</a> for better error reporting.', ['@schema_url' => 'https://raw.githubusercontent.com/nextagencyio/json_import/refs/heads/1.x/resources/schema.json']) . '</p>',
     ];
 

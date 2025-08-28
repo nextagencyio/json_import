@@ -99,11 +99,13 @@ class DrupalContentImporter {
       }
     }
 
-    // Configure GraphQL Compose after all bundles and fields are created.
-    foreach ($bundle_defs as $def) {
-      $entity_type = $def['entity'] ?? 'node';
-      $bundle = $def['bundle'];
-      $this->configureGraphQLCompose($entity_type, $bundle, $preview_mode, $result);
+    // Configure GraphQL Compose after all bundles and fields are created (only if GraphQL modules exist).
+    if (\Drupal::moduleHandler()->moduleExists('graphql_compose')) {
+      foreach ($bundle_defs as $def) {
+        $entity_type = $def['entity'] ?? 'node';
+        $bundle = $def['bundle'];
+        $this->configureGraphQLCompose($entity_type, $bundle, $preview_mode, $result);
+      }
     }
 
     // Create content if present.
@@ -113,8 +115,10 @@ class DrupalContentImporter {
 
     // Clear GraphQL caches after successful import (skip in preview mode).
     if (!$preview_mode) {
-      $this->clearGraphQLCaches();
-      $result['summary'][] = "Cleared GraphQL caches for schema updates";
+      $cleared_caches = $this->clearGraphQLCaches();
+      if ($cleared_caches) {
+        $result['summary'][] = "Cleared GraphQL caches for schema updates";
+      }
     }
 
     return $result;
@@ -269,10 +273,10 @@ class DrupalContentImporter {
       }
       $field_name = 'field_' . $this->sanitizeFieldName($field_id);
       $widget_type = $drupal['widget'] ?? 'string_textfield';
-      
+
       // Configure widget settings
       $widget_settings = [];
-      
+
       // Set paragraphs to be collapsed by default
       if ($widget_type === 'paragraphs') {
         $widget_settings = [
@@ -285,7 +289,7 @@ class DrupalContentImporter {
           'default_paragraph_type' => '',
         ];
       }
-      
+
       $display_config['content'][$field_name] = [
         'type' => $widget_type,
         'weight' => $weight++,
@@ -343,10 +347,34 @@ class DrupalContentImporter {
   private function createContentConcise(array $content, $preview_mode, array &$result) {
     $created = [];
 
-    // First pass: create entities without resolving @refs.
+    // Identify embedded entity IDs (entities that are only referenced within other entities' fields)
+    $embedded_ids = $this->findEmbeddedEntityIds($content);
+
+    // Define sub-component types that should never be created as top-level entities
+    $sub_component_types = [
+      'paragraph.card',
+      'paragraph.accordion_item',
+      'paragraph.carousel_item',
+      'paragraph.bullet',
+      'paragraph.pricing_card',
+    ];
+
+    // First pass: create entities without resolving @refs, but skip embedded entities and sub-components.
     foreach ($content as $item) {
+      $item_type = $item['type'] ?? '';
+
+      // Skip entities that are only embedded within other entities
+      if (isset($item['id']) && in_array($item['id'], $embedded_ids)) {
+        continue;
+      }
+
+      // Skip sub-component paragraph types that should never be top-level
+      if (in_array($item_type, $sub_component_types)) {
+        continue;
+      }
+
       $entity = $this->createConciseEntry($item, $preview_mode, $result);
-      if ($entity) {
+      if ($entity && isset($item['id'])) {
         $created[$item['id']] = $entity;
       }
     }
@@ -357,17 +385,134 @@ class DrupalContentImporter {
 
     // Second pass: resolve @refs and taxonomy terms.
     foreach ($content as $item) {
-      if (isset($created[$item['id']])) {
+      if (isset($item['id']) && isset($created[$item['id']])) {
+        // Debug logging for field_content resolution
+        $item_type = $item['type'] ?? 'unknown';
+        if ($item_type === 'node.landing') {
+          $entity_label = method_exists($created[$item['id']], 'label') ? $created[$item['id']]->label() : 'Unknown';
+          error_log("JSON Import Debug: About to resolve references for node '{$entity_label}' (ID: {$created[$item['id']]->id()})");
+        }
+
         $this->resolveConciseReferences($item, $created[$item['id']], $created, $result);
       }
     }
   }
 
-  private function createConciseEntry(array $item, $preview_mode, array &$result) {
+  /**
+   * Process field_content @ references specifically.
+   */
+  private function processFieldContentReferences($entity, $refs, $created, &$result, $field_name) {
+    $field_definition = $entity->getFieldDefinition($field_name);
+    $field_type = $field_definition->getType();
+    $items = [];
+    $resolved_refs = [];
+
+    error_log("JSON Import Debug: Processing field_content references for entity ID {$entity->id()}: " . json_encode($refs));
+
+    foreach ($refs as $ref_string) {
+      $ref = substr($ref_string, 1); // Remove @
+      if (isset($created[$ref])) {
+        $ref_entity = $created[$ref];
+        $resolved_refs[] = $ref;
+
+        if ($field_type === 'entity_reference_revisions') {
+          $items[] = [
+            'target_id' => (int) $ref_entity->id(),
+            'target_revision_id' => (int) $ref_entity->getRevisionId(),
+          ];
+        } elseif ($field_type === 'entity_reference') {
+          $items[] = [
+            'target_id' => (int) $ref_entity->id(),
+          ];
+        } else {
+          $items[] = (int) $ref_entity->id();
+        }
+      } else {
+        $result['warnings'][] = "Could not resolve field_content reference: {$ref_string}";
+        error_log("JSON Import Debug: Could not resolve field_content reference '{$ref}' - not found in created entities");
+      }
+    }
+
+    if (!empty($items)) {
+      if ($field_type === 'entity_reference_revisions') {
+        $field_list = $entity->get($field_name);
+        $field_list->setValue($items);
+        $entity->save();
+        $result['summary'][] = "Resolved field_content references: [" . implode(', ', $resolved_refs) . "]";
+        error_log("JSON Import Debug: Successfully set field_content with " . count($items) . " references");
+      } else {
+        $entity->set($field_name, $items);
+        $entity->save();
+        $result['summary'][] = "Resolved field_content references: [" . implode(', ', $resolved_refs) . "]";
+      }
+    } else {
+      error_log("JSON Import Debug: No field_content references could be resolved");
+    }
+  }
+
+  /**
+   * Find entity IDs that are embedded within other entities' field arrays.
+   */
+  private function findEmbeddedEntityIds(array $content): array {
+    $embedded_ids = [];
+
+    foreach ($content as $item) {
+      $values = $item['values'] ?? [];
+      foreach ($values as $field_value) {
+        if (is_array($field_value)) {
+          $this->collectEmbeddedIds($field_value, $embedded_ids);
+        }
+      }
+    }
+
+    return array_unique($embedded_ids);
+  }
+
+  /**
+   * Recursively collect embedded entity IDs from field values.
+   */
+  private function collectEmbeddedIds($value, array &$embedded_ids): void {
+    if (is_array($value)) {
+      // Check if this is an embedded entity object
+      if (isset($value['id'], $value['type'], $value['values'])) {
+        $embedded_ids[] = $value['id'];
+        // Recursively check within the embedded entity's values
+        foreach ($value['values'] as $nested_value) {
+          if (is_array($nested_value)) {
+            $this->collectEmbeddedIds($nested_value, $embedded_ids);
+          }
+        }
+      } else {
+        // Check if this is an array of items that might contain embedded entities
+        foreach ($value as $item) {
+          if (is_array($item)) {
+            $this->collectEmbeddedIds($item, $embedded_ids);
+          }
+        }
+      }
+    }
+  }
+
+    private function createConciseEntry(array $item, $preview_mode, array &$result) {
     $type = $item['type'];
     $parts = explode('.', $type, 2);
     $entity_type = $parts[0] ?? 'node';
     $bundle = $parts[1] ?? NULL;
+
+    // Debug logging for node creation (disabled for performance)
+    // if ($entity_type === 'node') {
+    //   $item_values = $item['values'] ?? [];
+    //   if (isset($item_values['field_content'])) {
+    //     error_log("JSON Import Debug: Creating node with field_content: " . json_encode($item_values['field_content']));
+    //   }
+    // }
+
+    // For simple types without dots, default to paragraph
+    if (!str_contains($type, '.')) {
+      $entity_type = 'paragraph';
+      $bundle = $type;
+    }
+
     $values = $item['values'] ?? [];
 
     if ($entity_type === 'paragraph') {
@@ -382,9 +527,88 @@ class DrupalContentImporter {
       }
       $paragraph = $paragraph_storage->create($data);
       $paragraph->save();
-      $title = $values['title'] ?? $item['id'];
+      $title = $values['title'] ?? $item['id'] ?? 'Untitled';
       $result['summary'][] = "Created paragraph: {$title} (ID: {$paragraph->id()}, type: {$bundle})";
       return $paragraph;
+    }
+
+    if ($entity_type === 'media') {
+      if ($preview_mode) {
+        $result['summary'][] = "Would create media: {$item['id']} (type: {$bundle})";
+        return NULL;
+      }
+
+      $file_entity = NULL;
+      $alt_text = $values['alt'] ?? $values['field_image']['alt'] ?? $values['title'] ?? $item['id'] ?? 'image';
+      
+      // Try to fetch image from external service (Pexels/Unsplash) if configured
+      $image_data = NULL;
+      $file_extension = 'png';
+      
+      if (\Drupal::hasService('drupalx_ai.image_generator')) {
+        $image_generator = \Drupal::service('drupalx_ai.image_generator');
+        $fetched_image = $image_generator->fetchImage($alt_text);
+        
+        if ($fetched_image) {
+          $image_data = $fetched_image['data'];
+          $file_extension = $fetched_image['extension'];
+        }
+      }
+      
+      // Fallback to placeholder image if no external image was fetched
+      if (!$image_data) {
+        $placeholder_path = \Drupal::service('extension.list.module')->getPath('drupalx_ai') . '/files/card.png';
+        if (!file_exists($placeholder_path)) {
+          // Fallback to json_import placeholder if drupalx_ai one doesn't exist
+          $placeholder_path = \Drupal::service('extension.list.module')->getPath('json_import') . '/resources/placeholder.png';
+        }
+
+        if (file_exists($placeholder_path)) {
+          $image_data = file_get_contents($placeholder_path);
+          $file_extension = 'png';
+        }
+      }
+
+      if ($image_data) {
+        // Create a unique filename to avoid conflicts
+        $safe_filename = preg_replace('/[^a-zA-Z0-9_-]/', '_', strtolower($alt_text)) . '.' . $file_extension;
+        $destination = 'public://ai-generated/' . $safe_filename;
+
+        // Ensure directory exists
+        $directory = dirname($destination);
+        \Drupal::service('file_system')->prepareDirectory($directory, \Drupal\Core\File\FileSystemInterface::CREATE_DIRECTORY);
+
+        // Save image data to destination
+        $file_entity = \Drupal::service('file.repository')->writeData(
+          $image_data,
+          $destination,
+          \Drupal\Core\File\FileSystemInterface::EXISTS_REPLACE
+        );
+      }
+
+      $media_storage = $this->entityTypeManager->getStorage('media');
+      $media_data = [
+        'bundle' => $bundle,
+        'name' => $values['alt'] ?? $values['title'] ?? $item['id'] ?? 'Untitled Media',
+        'status' => 1,
+        'uid' => 1,
+      ];
+
+      // Handle media-specific fields with actual file
+      if ($file_entity) {
+        // Try to get alt text from various sources
+        $alt_text = $values['alt'] ?? $values['field_image']['alt'] ?? $values['title'] ?? $item['id'] ?? 'Image';
+        
+        $media_data['field_image'] = [
+          'target_id' => $file_entity->id(),
+          'alt' => $alt_text,
+        ];
+      }
+
+      $media = $media_storage->create($media_data);
+      $media->save();
+      $result['summary'][] = "Created media: {$media_data['name']} (ID: {$media->id()}, type: {$bundle})";
+      return $media;
     }
 
     // Default: node.
@@ -405,6 +629,22 @@ class DrupalContentImporter {
         // Already handled.
         continue;
       }
+
+      // Special handling for field_content: skip @ references during entity creation, handle in second pass
+      if ($field_id === 'field_content' && is_array($value)) {
+        $all_refs = TRUE;
+        foreach ($value as $item) {
+          if (!is_string($item) || strlen($item) <= 1 || $item[0] !== '@') {
+            $all_refs = FALSE;
+            break;
+          }
+        }
+        if ($all_refs) {
+          // Skip field_content during entity creation, handle in second pass
+          continue;
+        }
+      }
+
       if ($this->isReservedField($field_id, 'node')) {
         $node_data[$field_id] = $this->mapFieldValueConcise($value, $field_id);
       } else {
@@ -430,13 +670,24 @@ class DrupalContentImporter {
     if ($value === NULL) {
       return NULL;
     }
+
+    // Debug logging for field_content specifically (disabled for performance)
+    // if ($field_id === 'field_content' || $field_id === 'content') {
+    //   error_log("JSON Import Debug: mapFieldValueConcise for field '{$field_id}' with value: " . json_encode($value));
+    // }
+
     // Reference marker like @foo.
     if (is_string($value) && strlen($value) > 1 && $value[0] === '@') {
       return NULL; // Will resolve later.
     }
-    // Handle image field objects with URI.
-    if (is_array($value) && isset($value['uri'])) {
+    // Handle image field objects with URI (but not link fields).
+    if (is_array($value) && isset($value['uri']) && !isset($value['title'])) {
       return $this->handleImageFieldValue($value, $field_id);
+    }
+
+    // Handle link fields with uri and title.
+    if (is_array($value) && isset($value['uri']) && isset($value['title'])) {
+      return $value; // Link fields can be passed through as-is
     }
     // Arrays of scalars -> [{value: item}].
     if (is_array($value)) {
@@ -459,6 +710,27 @@ class DrupalContentImporter {
           }
         }
         return $processed_images;
+      }
+
+      // Check if this is an array of embedded entity objects (each item has 'id', 'type', 'values')
+      $is_entity_array = !empty($value) && is_array($value[0]) && isset($value[0]['id'], $value[0]['type'], $value[0]['values']);
+      if ($is_entity_array) {
+        return NULL; // Will be handled in resolveConciseReferences
+      }
+
+      // Special handling for field_content arrays of @ references
+      if (($field_id === 'field_content' || $field_id === 'content') && !empty($value)) {
+        $all_refs = TRUE;
+        foreach ($value as $item) {
+          if (!is_string($item) || strlen($item) <= 1 || $item[0] !== '@') {
+            $all_refs = FALSE;
+            break;
+          }
+        }
+        if ($all_refs) {
+          // Return the array as-is for @ reference resolution in second pass
+          return $value; // Keep @ references intact for second pass resolution
+        }
       }
 
       return array_map(function ($item) {
@@ -491,17 +763,55 @@ class DrupalContentImporter {
     $entity_type = $parts[0] ?? 'node';
     $bundle = $parts[1] ?? NULL;
 
+    // Debug logging for nodes (disabled for performance)
+    // if ($entity_type === 'node') {
+    //   $entity_label = method_exists($entity, 'label') ? $entity->label() : 'Unknown';
+    //   error_log("JSON Import Debug: Processing node '{$entity_label}' values: " . json_encode(array_keys($values)));
+    //   if (isset($values['field_content'])) {
+    //     error_log("JSON Import Debug: Node field_content value in second pass: " . json_encode($values['field_content']));
+    //   } else {
+    //     error_log("JSON Import Debug: Node field_content value is NOT present in second pass values");
+    //   }
+    // }
+
     foreach ($values as $field_id => $value) {
-      $drupal_field_name = $this->isReservedField($field_id, $entity_type) ? $field_id : 'field_' . $this->sanitizeFieldName($field_id);
+      // Special handling for field_content which is already prefixed
+      if ($field_id === 'field_content') {
+        $drupal_field_name = 'field_content';
+      } else {
+        $drupal_field_name = $this->isReservedField($field_id, $entity_type) ? $field_id : 'field_' . $this->sanitizeFieldName($field_id);
+      }
+
+      // Debug logging for ALL fields on nodes (disabled for performance)
+      // if ($entity_type === 'node') {
+      //   $entity_label = method_exists($entity, 'label') ? $entity->label() : 'Unknown';
+      //   error_log("JSON Import Debug: Node '{$entity_label}' processing field '{$field_id}' -> '{$drupal_field_name}' with value: " . json_encode($value));
+      // }
+
       if (!$entity->hasField($drupal_field_name)) {
+        if ($drupal_field_name === 'field_content') {
+          error_log("JSON Import Debug: Entity does not have field_content field!");
+        }
         continue;
       }
+
+      // Additional debug for field_content field definition (disabled for performance)
+      // if ($drupal_field_name === 'field_content') {
+      //   $field_definition = $entity->getFieldDefinition($drupal_field_name);
+      //   $field_type = $field_definition->getType();
+      //   error_log("JSON Import Debug: field_content field type: " . $field_type);
+      // }
 
       // Get field definition once for type and settings.
       $field_definition = $entity->getFieldDefinition($drupal_field_name);
 
       // Handle references marked with @.
       if (is_string($value) && strlen($value) > 1 && $value[0] === '@') {
+        // Debug logging for single @ references in field_content
+        if ($drupal_field_name === 'field_content') {
+          error_log("JSON Import Debug: field_content processing single @ reference: " . $value);
+        }
+
         $ref = substr($value, 1);
         if (isset($created[$ref])) {
           $field_type = $field_definition->getType();
@@ -538,14 +848,33 @@ class DrupalContentImporter {
         continue;
       }
 
-      // Handle arrays of references marked with @.
+            // Handle arrays of references marked with @.
       if (is_array($value) && !empty($value)) {
+        // Debug logging for field_content arrays
+        if ($drupal_field_name === 'field_content') {
+          error_log("JSON Import Debug: field_content is array with " . count($value) . " items: " . json_encode($value));
+        }
+
         $all_refs = TRUE;
+        $refs_to_process = [];
+
         foreach ($value as $item) {
-          if (!is_string($item) || strlen($item) <= 1 || $item[0] !== '@') {
+          // Handle both direct @ references and value-wrapped @ references
+          $ref_string = '';
+          if (is_string($item) && strlen($item) > 1 && $item[0] === '@') {
+            $ref_string = $item;
+          } elseif (is_array($item) && isset($item['value']) && is_string($item['value']) && strlen($item['value']) > 1 && $item['value'][0] === '@') {
+            $ref_string = $item['value'];
+          } else {
             $all_refs = FALSE;
             break;
           }
+          $refs_to_process[] = $ref_string;
+        }
+
+        // Debug logging for field_content all_refs check
+        if ($drupal_field_name === 'field_content') {
+          error_log("JSON Import Debug: field_content all_refs check result: " . ($all_refs ? 'TRUE' : 'FALSE'));
         }
 
         if ($all_refs) {
@@ -553,7 +882,13 @@ class DrupalContentImporter {
           $items = [];
           $resolved_refs = [];
 
-          foreach ($value as $item) {
+          // Debug logging for field_content
+          if ($drupal_field_name === 'field_content') {
+            $entity_label = method_exists($entity, 'label') ? $entity->label() : 'Unknown';
+            error_log("JSON Import Debug: Processing field_content for entity '{$entity_label}' (ID: {$entity->id()}) with " . count($refs_to_process) . " references: " . implode(', ', $refs_to_process));
+          }
+
+          foreach ($refs_to_process as $item) {
             $ref = substr($item, 1);
             if (isset($created[$ref])) {
               $ref_entity = $created[$ref];
@@ -576,6 +911,11 @@ class DrupalContentImporter {
               }
             } else {
               $result['warnings'][] = "Could not resolve reference {$field_id} -> {$ref}";
+
+              // Debug logging for field_content
+              if ($drupal_field_name === 'field_content') {
+                error_log("JSON Import Debug: Could not resolve field_content reference '{$ref}' - not found in created entities");
+              }
             }
           }
 
@@ -589,6 +929,79 @@ class DrupalContentImporter {
               $entity->set($drupal_field_name, $items);
               $entity->save();
               $result['summary'][] = "Resolved entity references: {$field_id} -> [" . implode(', ', $resolved_refs) . "]";
+            }
+          }
+          continue;
+        }
+      }
+
+      // Handle arrays of embedded entity objects (each item has 'id', 'type', 'values')
+      if (is_array($value) && !empty($value)) {
+        $all_embedded_entities = TRUE;
+        foreach ($value as $item) {
+          if (!is_array($item) || !isset($item['id'], $item['type'], $item['values'])) {
+            $all_embedded_entities = FALSE;
+            break;
+          }
+        }
+
+        if ($all_embedded_entities) {
+          $field_type = $field_definition->getType();
+          $embedded_entities = [];
+          $created_embedded = [];
+
+          // Define sub-component types for embedded entity creation as well
+          $sub_component_types = [
+            'paragraph.card',
+            'paragraph.accordion_item',
+            'paragraph.carousel_item',
+            'paragraph.bullet',
+            'paragraph.pricing_card',
+          ];
+
+          foreach ($value as $embedded_item) {
+            // Create the embedded entity (sub-components are allowed here since they're embedded)
+            $embedded_entity = $this->createConciseEntry($embedded_item, FALSE, $result);
+            if ($embedded_entity && isset($embedded_item['id'])) {
+              $created_embedded[$embedded_item['id']] = $embedded_entity;
+              // Also add to main created array to track globally
+              $created[$embedded_item['id']] = $embedded_entity;
+
+              if ($field_type === 'entity_reference_revisions') {
+                // Paragraph reference: set using explicit IDs as item list.
+                $embedded_entities[] = [
+                  'target_id' => (int) $embedded_entity->id(),
+                  'target_revision_id' => (int) $embedded_entity->getRevisionId(),
+                ];
+              } elseif ($field_type === 'entity_reference') {
+                // Node or term reference by target_id.
+                $embedded_entities[] = [
+                  'target_id' => (int) $embedded_entity->id(),
+                ];
+              } else {
+                // Fallback: best-effort assign ID.
+                $embedded_entities[] = (int) $embedded_entity->id();
+              }
+            }
+          }
+
+          if (!empty($embedded_entities)) {
+            if ($field_type === 'entity_reference_revisions') {
+              $field_list = $entity->get($drupal_field_name);
+              $field_list->setValue($embedded_entities);
+              $entity->save();
+              $result['summary'][] = "Created and resolved embedded paragraphs: {$field_id} (" . count($embedded_entities) . " items)";
+            } else {
+              $entity->set($drupal_field_name, $embedded_entities);
+              $entity->save();
+              $result['summary'][] = "Created and resolved embedded entities: {$field_id} (" . count($embedded_entities) . " items)";
+            }
+
+            // Now resolve any @references within the embedded entities
+            foreach ($value as $embedded_item) {
+              if (isset($embedded_item['id']) && isset($created_embedded[$embedded_item['id']])) {
+                $this->resolveConciseReferences($embedded_item, $created_embedded[$embedded_item['id']], $created, $result);
+              }
             }
           }
           continue;
@@ -1036,13 +1449,33 @@ class DrupalContentImporter {
 
 
   /**
-   * Clear GraphQL-specific caches instead of all caches.
+   * Clear GraphQL-specific caches if GraphQL modules are installed.
+   *
+   * @return bool
+   *   TRUE if caches were cleared or GraphQL modules exist, FALSE if no GraphQL modules found.
    */
-  private function clearGraphQLCaches(): void {
+  private function clearGraphQLCaches(): bool {
+    // Check if any GraphQL modules are installed before attempting cache clearing.
+    $module_handler = \Drupal::moduleHandler();
+    $graphql_modules = ['graphql', 'graphql_compose'];
+    $has_graphql = FALSE;
+
+    foreach ($graphql_modules as $module) {
+      if ($module_handler->moduleExists($module)) {
+        $has_graphql = TRUE;
+        break;
+      }
+    }
+
+    if (!$has_graphql) {
+      // No GraphQL modules installed, skip cache clearing.
+      return FALSE;
+    }
+
     // Use GraphQL Compose's cache clearing function if available.
     if (function_exists('_graphql_compose_cache_flush')) {
       _graphql_compose_cache_flush();
-      return;
+      return TRUE;
     }
 
     // Fallback: Clear individual GraphQL cache bins.
@@ -1054,17 +1487,19 @@ class DrupalContentImporter {
       'cache.graphql_compose.definitions',
     ];
 
+    $cleared_any = FALSE;
     foreach ($cache_bins as $cache_bin) {
       try {
         \Drupal::service($cache_bin)->deleteAll();
+        $cleared_any = TRUE;
       } catch (\Exception $e) {
-        // Cache service might not exist, continue with others.
-        \Drupal::logger('json_import')->warning('Could not clear cache bin @bin: @message', [
-          '@bin' => $cache_bin,
-          '@message' => $e->getMessage(),
-        ]);
+        // Cache service might not exist, continue with others silently.
+        // Only log if we actually have GraphQL modules but services are missing.
+        continue;
       }
     }
+
+    return $cleared_any;
   }
 }
 
