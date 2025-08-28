@@ -6,6 +6,7 @@ use Drupal\json_import\Service\DrupalContentImporter;
 use Drupal\json_import\Service\JsonSchemaValidator;
 use Drush\Commands\DrushCommands;
 use Drush\Attributes as CLI;
+use Consolidation\AnnotatedCommand\CommandData;
 
 /**
  * Drush commands for JSON import functionality.
@@ -35,6 +36,7 @@ final class JsonImportCommands extends DrushCommands {
    *   The JSON schema validator service.
    */
   public function __construct(DrupalContentImporter $importer, JsonSchemaValidator $schema_validator) {
+    parent::__construct();
     $this->importer = $importer;
     $this->schemaValidator = $schema_validator;
   }
@@ -49,14 +51,10 @@ final class JsonImportCommands extends DrushCommands {
    *
    * @command json_import:import
    * @aliases ji:import
-   * @usage json_import:import /path/to/config.json
-   *   Import configuration and content from the specified JSON file.
-   * @usage json_import:import /path/to/config.json --preview
-   *   Preview what would be imported without making changes.
+   * @option preview Preview mode - show what would be imported without making changes
+   * @usage json_import:import /path/to/config.json Import configuration and content from the specified JSON file
+   * @usage json_import:import /path/to/config.json --preview Preview what would be imported without making changes
    */
-  #[CLI\Command(name: 'json_import:import', aliases: ['ji:import'])]
-  #[CLI\Argument(name: 'file', description: 'Path to the JSON file to import')]
-  #[CLI\Option(name: 'preview', description: 'Preview mode - show what would be imported without making changes')]
   public function import(string $file, array $options = ['preview' => FALSE]): void {
     
     // Validate file exists and is readable
@@ -143,12 +141,9 @@ final class JsonImportCommands extends DrushCommands {
    *
    * @command json_import:example
    * @aliases ji:example
-   * @usage json_import:example
-   *   Output example JSON configuration to console.
-   * @usage json_import:example > example.json
-   *   Save example JSON to a file.
+   * @usage json_import:example Output example JSON configuration to console
+   * @usage json_import:example > example.json Save example JSON to a file
    */
-  #[CLI\Command(name: 'json_import:example', aliases: ['ji:example'])]
   public function example(): void {
     $example_json = $this->getExampleJson();
     $this->output()->writeln($example_json);

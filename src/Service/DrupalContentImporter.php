@@ -931,11 +931,11 @@ class DrupalContentImporter {
   private function handleImageFieldValue(array $value, string $field_id) {
     $uri = $value['uri'] ?? NULL;
     if (!$uri) {
-      \Drupal::logger('dcloud_import')->warning('No URI provided for image field @field_id', ['@field_id' => $field_id]);
+      \Drupal::logger('json_import')->warning('No URI provided for image field @field_id', ['@field_id' => $field_id]);
       return NULL;
     }
 
-    \Drupal::logger('dcloud_import')->info('Processing image field @field_id with URI: @uri', [
+    \Drupal::logger('json_import')->info('Processing image field @field_id with URI: @uri', [
       '@field_id' => $field_id,
       '@uri' => $uri
     ]);
@@ -980,7 +980,7 @@ class DrupalContentImporter {
     }
 
     if (!$source_path || !file_exists($source_path)) {
-      \Drupal::logger('dcloud_import')->warning('Image source not found or accessible: @path for field @field_id', [
+      \Drupal::logger('json_import')->warning('Image source not found or accessible: @path for field @field_id', [
         '@path' => $source_path,
         '@field_id' => $field_id
       ]);
@@ -1015,7 +1015,7 @@ class DrupalContentImporter {
       ]);
       $file->save();
 
-      \Drupal::logger('dcloud_import')->info('Successfully created file entity ID @file_id for field @field_id', [
+      \Drupal::logger('json_import')->info('Successfully created file entity ID @file_id for field @field_id', [
         '@file_id' => $file->id(),
         '@field_id' => $field_id
       ]);
@@ -1030,7 +1030,7 @@ class DrupalContentImporter {
       ];
     }
 
-    \Drupal::logger('dcloud_import')->warning('Failed to copy file to destination for field @field_id', ['@field_id' => $field_id]);
+    \Drupal::logger('json_import')->warning('Failed to copy file to destination for field @field_id', ['@field_id' => $field_id]);
     return NULL;
   }
 
@@ -1059,7 +1059,7 @@ class DrupalContentImporter {
         \Drupal::service($cache_bin)->deleteAll();
       } catch (\Exception $e) {
         // Cache service might not exist, continue with others.
-        \Drupal::logger('dcloud_import')->warning('Could not clear cache bin @bin: @message', [
+        \Drupal::logger('json_import')->warning('Could not clear cache bin @bin: @message', [
           '@bin' => $cache_bin,
           '@message' => $e->getMessage(),
         ]);

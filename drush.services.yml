@@ -1,0 +1,8 @@
+services:
+  json_import.commands:
+    class: Drupal\json_import\Commands\JsonImportCommands
+    arguments:
+      - '@json_import.importer'
+      - '@json_import.schema_validator'
+    tags:
+      - { name: drush.command }

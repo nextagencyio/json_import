@@ -70,7 +70,7 @@
         "detail_title": "Schedule",
         "detail_content": "The event will run from 9:00 AM to 5:00 PM with lunch break at noon.",
         "detail_image": {
-          "uri": "/modules/custom/dcloud_import/resources/placeholder.png",
+          "uri": "/modules/contrib/json_import/resources/placeholder.png",
           "alt": "Event schedule timeline showing sessions and breaks",
           "title": "Conference Schedule"
         }
@@ -94,7 +94,7 @@
         "event_date": "2024-03-15T09:00:00",
         "location": "Convention Center Downtown",
         "featured_image": {
-          "uri": "/modules/custom/dcloud_import/resources/placeholder.png",
+          "uri": "/modules/contrib/json_import/resources/placeholder.png",
           "alt": "Web Development Conference 2024 promotional image",
           "title": "Conference Hero Image"
         },

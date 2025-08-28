@@ -2,8 +2,7 @@
 
 namespace Drupal\json_import\Service;
 
-use JsonSchema\Validator;
-use JsonSchema\Constraints\Constraint;
+// JSON Schema validation classes (if available)
 use Drupal\Core\StringTranslation\StringTranslationTrait;
 
 /**
@@ -29,7 +28,7 @@ class JsonSchemaValidator {
    */
   public function validate(array $data): array {
     // Check if the JSON Schema library is available
-    if (!class_exists('JsonSchema\Validator')) {
+    if (!class_exists('\JsonSchema\Validator')) {
       return [
         'valid' => TRUE,
         'errors' => [],
@@ -52,8 +51,8 @@ class JsonSchemaValidator {
       $data_object = json_decode(json_encode($data));
 
       // Validate against schema
-      $validator = new Validator();
-      $validator->validate($data_object, $schema, Constraint::CHECK_MODE_COERCE_TYPES);
+      $validator = new \JsonSchema\Validator();
+      $validator->validate($data_object, $schema, \JsonSchema\Constraints\Constraint::CHECK_MODE_COERCE_TYPES);
 
       if ($validator->isValid()) {
         return [
