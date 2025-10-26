@@ -121,11 +121,3 @@ json_import/
 └── resources/
     └── sample.json
 ```
-
-## Differences from dcloud_import
-
-- Removed all API endpoints and controllers
-- Simplified permissions to single import permission
-- Added drush command functionality  
-- Focused on JSON import only
-- Updated module metadata and menu placement
