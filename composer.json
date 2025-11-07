@@ -16,7 +16,7 @@
   "require": {
     "drupal/core": "^10 || ^11",
     "drupal/paragraphs": "*",
-    "justinrainbow/json-schema": "^5.2"
+    "justinrainbow/json-schema": "^5.2 || ^6.3"
   },
   "require-dev": {
     "drupal/core-dev": "^10 || ^11"
